@@ -1,0 +1,26 @@
+AWSTemplateFormatVersion: 2010-09-09
+Resources:
+  SNSTopic:
+    Type: AWS::SNS::Topic
+
+  SNSTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref SNSTopic
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: s3.amazonaws.com
+            Resource: "*"
+            Action: sns:Publish
+
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      NotificationConfiguration:
+        TopicConfigurations:
+          - Topic: !Ref SNSTopic
+            Event: s3:ObjectCreated:*

@@ -1,0 +1,16 @@
+# security-group.yml
+Outputs:
+  StackSSHSecurityGroup:
+    Description: The SSH Security Group for our Company
+    Export:
+      Name: SSHSecurityGroup
+
+# ec2.yml
+Resources:
+  MySecureInstance:
+  Type: "AWS::EC2::Instance"
+  Properties:
+    AvailabilityZone: us-east-1a
+    ImageID: ami-a4c7edb2
+    SecurityGroup:
+      - !ImportValue SSHSecurityGroup

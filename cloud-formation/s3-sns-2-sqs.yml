@@ -1,0 +1,53 @@
+AWSTemplateFormatVersion: 2010-09-09
+Resources:
+  SQSQueue1:
+    Type: AWS::SQS::Queue
+
+  SQSQueue2:
+    Type: AWS::SQS::Queue
+
+  SNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      Subscription:
+        - Endpoint: !GetAtt SQSQueue1.Arn
+          Protocol: "sqs"
+        - Endpoint: !GetAtt SQSQueue2.Arn
+          Protocol: "sqs"
+
+  SNSTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref SNSTopic
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: s3.amazonaws.com
+            Resource: "*"
+            Action: sns:Publish
+
+  SQSQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref SQSQueue1
+        - !Ref SQSQueue2
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: sns.amazonaws.com
+            Resource: "*"
+            Action: sqs:SendMessage
+
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      NotificationConfiguration:
+        TopicConfigurations:
+          - Topic: !Ref SNSTopic
+            Event: s3:ObjectCreated:*

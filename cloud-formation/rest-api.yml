@@ -1,0 +1,355 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: AWS API Gateway with a Lambda Integration and DynamoDB
+
+Parameters:
+  GetLambdaFunctionName:
+    Type: String
+    MinLength: "1"
+    MaxLength: "64"
+    AllowedPattern: "[a-zA-Z][a-zA-Z0-9_-]*"
+    Description: The name of the Lambda function to GET resources from DynamoDB
+    Default: Get-Lambda-CFNExample
+
+  GetLambdaRoleName:
+    Type: String
+    MinLength: "1"
+    MaxLength: "64"
+    AllowedPattern: '[\w+=,.@-]+'
+    Description: The name of the IAM role used by GET Lambda function
+    Default: Get-Lambda-Role-CFNExample
+
+  GetLambdaPolicyName:
+    Type: String
+    MinLength: "1"
+    MaxLength: "128"
+    AllowedPattern: '[\w+=,.@-]+'
+    Description: The name of Policy used by GET Lambda function
+    Default: Get-Lambda-Policy-CFNExample
+
+  PostLambdaFunctionName:
+    Type: String
+    MinLength: "1"
+    MaxLength: "64"
+    AllowedPattern: "[a-zA-Z][a-zA-Z0-9_-]*"
+    Description: The name of the Lambda function to POST resources from DynamoDB
+    Default: Post-Lambda-CFNExample
+
+  PostLambdaRoleName:
+    Type: String
+    MinLength: "1"
+    MaxLength: "64"
+    AllowedPattern: '[\w+=,.@-]+'
+    Description: The name of the IAM role used by POST Lambda function
+    Default: Post-Lambda-Role-CFNExample
+
+  PostLambdaPolicyName:
+    Type: String
+    MinLength: "1"
+    MaxLength: "128"
+    AllowedPattern: '[\w+=,.@-]+'
+    Description: The name of Policy used by POST Lambda function
+    Default: Post-Lambda-Policy-CFNExample
+
+Resources:
+  UserTable:
+    Type: "AWS::DynamoDB::Table"
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: username
+          AttributeType: S
+      KeySchema:
+        - AttributeName: username
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      TableName: user-table
+
+  ApiGatewayRestApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      ApiKeySourceType: HEADER
+      Description: An API Gateway with a Lambda Integration
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+      Name: lambda-api
+
+  ApiGatewayResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt ApiGatewayRestApi.RootResourceId
+      PathPart: "lambda"
+      RestApiId: !Ref ApiGatewayRestApi
+
+  GetMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      ApiKeyRequired: false
+      AuthorizationType: NONE
+      HttpMethod: GET
+      Integration:
+        ConnectionType: INTERNET
+        Credentials: !GetAtt ApiGatewayIamRole.Arn
+        IntegrationHttpMethod: POST
+        PassthroughBehavior: WHEN_NO_MATCH
+        TimeoutInMillis: 29000
+        Type: AWS_PROXY
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetLambdaFunction.Arn}/invocations"
+      OperationName: "lambda"
+      ResourceId: !Ref ApiGatewayResource
+      RestApiId: !Ref ApiGatewayRestApi
+
+  PostMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      ApiKeyRequired: false
+      AuthorizationType: NONE
+      HttpMethod: POST
+      Integration:
+        ConnectionType: INTERNET
+        Credentials: !GetAtt ApiGatewayIamRole.Arn
+        IntegrationHttpMethod: POST
+        PassthroughBehavior: WHEN_NO_MATCH
+        TimeoutInMillis: 29000
+        Type: AWS_PROXY
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${PostLambdaFunction.Arn}/invocations"
+      OperationName: "lambda"
+      ResourceId: !Ref ApiGatewayResource
+      RestApiId: !Ref ApiGatewayRestApi
+
+  ApiGatewayModel:
+    Type: AWS::ApiGateway::Model
+    Properties:
+      ContentType: "application/json"
+      RestApiId: !Ref ApiGatewayRestApi
+      Schema: {}
+
+  ApiGatewayStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      DeploymentId: !Ref ApiGatewayDeployment
+      Description: Lambda API Stage v0
+      RestApiId: !Ref ApiGatewayRestApi
+      StageName: "v0"
+
+  ApiGatewayDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - GetMethod
+      - PostMethod
+    Properties:
+      Description: Lambda API Deployment
+      RestApiId: !Ref ApiGatewayRestApi
+
+  ApiGatewayIamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: ""
+            Effect: "Allow"
+            Principal:
+              Service:
+                - "apigateway.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        - PolicyName: LambdaAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action: "lambda:*"
+                Resource:
+                  - !GetAtt GetLambdaFunction.Arn
+                  - !GetAtt PostLambdaFunction.Arn
+
+  GetLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        ZipFile: |
+          import json
+
+          import boto3
+
+          dynamodb = boto3.resource("dynamodb")
+          table = dynamodb.Table("user-table")
+
+
+          def handler(event, context):
+              items = table.scan()["Items"]
+              usernames = list(map(lambda x: x["username"], items))
+              response = {
+                  "isBase64Encoded": False,
+                  "statusCode": 200,
+                  "headers": {},
+                  "multiValueHeaders": {},
+                  "body": json.dumps(usernames),
+              }
+              return response
+      Description: AWS Lambda function
+      FunctionName: !Ref GetLambdaFunctionName
+      Handler: index.handler
+      MemorySize: 256
+      Role: !GetAtt GetLambdaIamRole.Arn
+      Runtime: python3.10
+      Timeout: 60
+
+  GetLambdaIamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      ManagedPolicyArns:
+        - !Ref GetLambdaPolicy
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - "lambda.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+
+  GetLambdaPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Ref GetLambdaPolicyName
+      Description: Managed policy for a Lambda function launched by CloudFormation
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - "logs:CreateLogStream"
+              - "logs:PutLogEvents"
+            Resource:
+              !Join [
+                "",
+                [
+                  "arn:",
+                  !Ref AWS::Partition,
+                  ":logs:",
+                  !Ref AWS::Region,
+                  ":",
+                  !Ref AWS::AccountId,
+                  ":log-group:/aws/lambda/",
+                  !Ref GetLambdaFunctionName,
+                  ":*",
+                ],
+              ]
+          - Effect: Allow
+            Action:
+              - "logs:CreateLogGroup"
+            Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*"
+          - Effect: Allow
+            Action:
+              - "dynamodb:GetItem"
+              - "dynamodb:Scan"
+            Resource: !GetAtt UserTable.Arn
+
+  GetLambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Join ["", ["/aws/lambda/", !Ref GetLambdaFunctionName]]
+      RetentionInDays: 30
+
+  PostLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        ZipFile: |
+          import json
+
+          import boto3
+
+          dynamodb = boto3.resource("dynamodb")
+          table = dynamodb.Table("user-table")
+
+
+          def handler(event, context):
+              body = json.loads(event["body"])
+              username = body.get("username", False)
+              if not username:
+                  return {
+                      "statusCode": 400,
+                      "body": json.dumps({"error": "Missing required parameters: username"}),
+                  }
+
+              table.put_item(
+                  Item={
+                      "username": username,
+                  }
+              )
+              return {
+                  "statusCode": 200,
+                  "body": json.dumps({"message": "Data inserted successfully"}),
+              }
+      Description: AWS Lambda function
+      FunctionName: !Ref PostLambdaFunctionName
+      Handler: index.handler
+      MemorySize: 256
+      Role: !GetAtt PostLambdaIamRole.Arn
+      Runtime: python3.10
+      Timeout: 60
+
+  PostLambdaIamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      ManagedPolicyArns:
+        - !Ref PostLambdaPolicy
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - "lambda.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+
+  PostLambdaPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Ref PostLambdaPolicyName
+      Description: Managed policy for a Lambda function launched by CloudFormation
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - "logs:CreateLogStream"
+              - "logs:PutLogEvents"
+            Resource:
+              !Join [
+                "",
+                [
+                  "arn:",
+                  !Ref AWS::Partition,
+                  ":logs:",
+                  !Ref AWS::Region,
+                  ":",
+                  !Ref AWS::AccountId,
+                  ":log-group:/aws/lambda/",
+                  !Ref PostLambdaFunctionName,
+                  ":*",
+                ],
+              ]
+          - Effect: Allow
+            Action:
+              - "logs:CreateLogGroup"
+            Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*"
+          - Effect: Allow
+            Action:
+              - "dynamodb:PutItem"
+            Resource: !GetAtt UserTable.Arn
+
+  PostLambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Join ["", ["/aws/lambda/", !Ref PostLambdaFunctionName]]
+      RetentionInDays: 30

@@ -1,0 +1,25 @@
+Resources:
+  SQSQueue:
+    Type: AWS::SQS::Queue
+
+  SQSPolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref SQSQueue
+      PolicyDocument:
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service: s3.amazonaws.com
+            Resource: "*"
+            Action:
+              - sqs:SendMessage
+
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      NotificationConfiguration:
+        QueueConfigurations:
+          - Event: s3:ObjectCreated:*
+            Queue: !GetAtt SQSQueue.Arn
